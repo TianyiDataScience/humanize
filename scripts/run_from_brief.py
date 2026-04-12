@@ -1008,6 +1008,41 @@ def looks_like_short_message_task(task: str, hard_constraints: dict[str, Any] | 
     return bool(max_chars and int(max_chars) <= 120 and len(task) <= 80)
 
 
+def infer_service_issue(task: str, source_text: str) -> str:
+    context = f"{task}。{source_text}"
+    patterns = [
+        r"申请([^，。；;]{1,24})的客户",
+        r"反馈的([^，。；;]{1,32})",
+        r"咨询的([^，。；;]{1,32})",
+        r"关于您([^，。；;]{1,32})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, context)
+        if not match:
+            continue
+        issue = match.group(1).strip()
+        issue = re.sub(r"(诉求|事项|问题|情况)$", "", issue).strip()
+        issue = re.sub(r"^(当前|这个|相关)", "", issue).strip()
+        if issue and len(issue) <= 24:
+            return f"{issue}问题" if not issue.endswith("问题") else issue
+    service_keywords = (
+        "退款",
+        "退换",
+        "破损",
+        "延迟",
+        "配送",
+        "物流",
+        "投诉",
+        "售后",
+        "发票",
+        "订单",
+    )
+    for keyword in service_keywords:
+        if keyword in context:
+            return f"{keyword}问题"
+    return "这个问题"
+
+
 def looks_like_professional_email(task: str, source_text: str) -> bool:
     lowered_task = task.lower()
     if ("微信" in task or "wechat" in lowered_task or "消息" in task) and not ("邮件" in task or "email" in lowered_task):
@@ -1456,7 +1491,7 @@ def build_short_reply_heuristics(
     deadline = deadline_term(time_term)
     required_terms = [item for item in must_include if item != time_term]
     is_internal = any(marker in task for marker in ("老板", "上级", "领导"))
-    is_service = any(marker in task for marker in ("售后", "投诉", "安抚"))
+    is_service = any(marker in task for marker in ("售后", "投诉", "安抚", "退款", "退换"))
     is_app_push = any(marker in task for marker in ("App", "APP", "推送", "直播课")) and any(
         marker in task for marker in ("直播", "课程", "课")
     )
@@ -1470,6 +1505,7 @@ def build_short_reply_heuristics(
     first_term = required_terms[0] if required_terms else ""
     tail_terms = "、".join(required_terms[1:]) if len(required_terms) > 1 else ""
     issue, action = infer_progress_context(task)
+    service_issue = infer_service_issue(task, source_text) if is_service else ""
 
     if is_app_push:
         variants = [
@@ -1522,11 +1558,11 @@ def build_short_reply_heuristics(
         variants = [
             (
                 "heuristic-natural",
-                f"您好，您的问题已经登记，{time_term}会有{joined_terms.replace('已经登记、', '').replace('、已经登记', '') or '专员'}继续跟进处理，我这边也会同步您。"
+                f"您好，您反馈的{service_issue or '这个问题'}我这边已经登记并在核实了，目前还在处理中。有结果后我会尽快同步给您，后续有问题也可以随时联系我。"
             ),
             (
                 "heuristic-balanced",
-                f"您好，这边已经登记，{time_term}会安排{joined_terms.replace('已经登记、', '').replace('、已经登记', '') or '专员'}联系您处理，我也会持续跟进。"
+                f"您好，关于{service_issue or '这个问题'}，这边已经登记并在核实，目前还在处理中。有结果后会尽快同步给您，谢谢您的耐心。"
             ),
         ]
     elif is_repair_request:
@@ -1669,6 +1705,22 @@ def build_rewrite_heuristics(
     revision_mode: str,
 ) -> list[tuple[str, str]]:
     repair = revision_mode == "repair"
+    heuristics = build_email_rewrite_heuristics(
+        task,
+        source_text,
+        current_best_text,
+        failure_tags,
+        repair=repair,
+    )
+    if heuristics:
+        return heuristics
+    short_heuristics = build_short_reply_heuristics(
+        task,
+        current_best_text if repair else source_text,
+        hard_constraints,
+    )
+    if short_heuristics:
+        return short_heuristics
     if looks_like_longform_rewrite(task, source_text):
         if any(marker in task for marker in COPY_TASK_MARKERS):
             heuristics = build_longform_rewrite_heuristics(
@@ -1680,15 +1732,6 @@ def build_rewrite_heuristics(
             )
             if heuristics:
                 return heuristics
-    heuristics = build_email_rewrite_heuristics(
-        task,
-        source_text,
-        current_best_text,
-        failure_tags,
-        repair=repair,
-    )
-    if heuristics:
-        return heuristics
     heuristics = build_longform_rewrite_heuristics(
         task,
         source_text,
