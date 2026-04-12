@@ -1,0 +1,10 @@
+task: 给催进度客户发微信回复
+goal: 更自然、更像真人，别模板腔，别太像 AI 润色
+style_notes: []
+hard_constraints:
+  max_chars: 90
+  must_include:
+  - 明天下午
+  - 财务
+evaluator:
+  minimum_improvement: 0.015

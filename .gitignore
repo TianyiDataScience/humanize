@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Local runtime / generated artifacts
+runs/
+logs/
+*.log
+
+# CoPaw / local machine state
+.copaw/
+models/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Test / tooling cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

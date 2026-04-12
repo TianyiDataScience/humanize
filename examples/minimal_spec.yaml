@@ -1,0 +1,8 @@
+task: 给催进度客户发微信回复
+hard_constraints:
+  max_chars: 90
+  must_include:
+  - 明天下午
+  - 财务
+evaluator:
+  minimum_improvement: 0.015
