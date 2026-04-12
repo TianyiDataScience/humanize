@@ -52,6 +52,7 @@ def main() -> None:
     parser.add_argument("--challenger-text", default=None)
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--output-root", default="./runs")
+    parser.add_argument("--max-rounds", type=int, default=None)
     args = parser.parse_args()
 
     brief = build_text(args)
@@ -74,6 +75,8 @@ def main() -> None:
         sys.argv.extend(["--challenger-text", args.challenger_text])
     if args.run_dir:
         sys.argv.extend(["--run-dir", args.run_dir])
+    if args.max_rounds is not None:
+        sys.argv.extend(["--max-rounds", str(args.max_rounds)])
     runpy.run_path(str(script_path), run_name="__main__")
 
 

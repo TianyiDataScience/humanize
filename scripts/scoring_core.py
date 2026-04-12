@@ -93,10 +93,15 @@ DEFAULT_TEMPLATE_PHRASES = [
     "正式开展",
     "高质量学习型社群",
     "未能达到您的预期",
+    "高度重视",
     "第一时间高度重视",
     "同步相关部门",
+    "综合核实",
+    "有序推进",
+    "完整处理结果",
     "全面排查与优化",
     "持续完善服务流程",
+    "持续为您提供优质服务",
     "更加优质、高效、贴心",
     "宝贵反馈",
     "日前为我提供本次面试机会",
@@ -370,6 +375,9 @@ def sentence_splice_score(candidate: str, notes: list[str]) -> float:
         compact = re.sub(r"\s+", "", sentence)
         if re.search(r"如[^，。！？]{0,24}，如", compact):
             notes.append("sentence splice issue: repeated lead-in connectors")
+            return 0.0
+        if re.search(r"稍后前(?=给|向|为|把|会|同步|回复)", compact):
+            notes.append("sentence splice issue: invalid time connector")
             return 0.0
         has_condition = sum(1 for item in condition_markers if item in compact)
         has_contact = sum(1 for item in contact_markers if item in compact)

@@ -71,6 +71,28 @@ python3 humanize.py --text "用 humanize 帮我把这段话改自然一点。原
 
 第一次运行会创建独立 runtime，并下载默认本地 scorer 模型。生成侧会优先跟随宿主 active model；没有可用生成模型时，会降级到 `heuristic-only`。
 
+### 调整最大迭代轮数
+
+默认 `max_rounds=3`。这是上限，不是强制跑满 3 轮；如果第 1 轮已经通过质量门，会提前停止。
+
+临时调高到 5 轮：
+
+```bash
+python3 humanize.py --max-rounds 5 --text "用 humanize 帮我把这段话改自然一点。原文：..."
+```
+
+或者用环境变量：
+
+```bash
+HUMANIZE_MAX_ROUNDS=5 python3 humanize.py --text "用 humanize 帮我把这段话改自然一点。原文：..."
+```
+
+当前实现会把轮数限制在 `1..5`，避免因为质量门问题无限循环。一般建议：
+
+- 快速聊天回复：`1` 到 `2` 轮。
+- 普通邮件和短文案：默认 `3` 轮。
+- 明显 AI 味的长文案：可以临时设成 `5` 轮。
+
 ### 你会看到什么
 
 输出不是只给一句最终结果，而是会展示：
@@ -313,7 +335,7 @@ CoPaw 技能页面里几个入口的可靠性不一样：
 2. 确保仓库根目录有 `SKILL.md`、`README.md`、`LICENSE`，不要把本地模型、runs、logs 提交进去。
 3. 把 skill 发布到 Skills Hub / ClawHub，这样 CoPaw 用户才能在界面里搜索和导入。
 4. 让用户在 CoPaw 里点「从 Skills Hub 导入技能」，优先搜索或输入：`https://clawhub.ai/self-evolving-humanize-zh`。
-5. 如果 Hub 暂时不可用，再使用 GitHub 稳定版本 URL：`https://github.com/TianyiDataScience/humanize/tree/v0.1.4`。
+5. 如果 Hub 暂时不可用，再使用 GitHub 稳定版本 URL：`https://github.com/TianyiDataScience/humanize/tree/v0.1.5`。
 6. 同时提供 zip release，作为离线安装和临时测试的备用方案。
 
 一句话：
@@ -335,7 +357,7 @@ self-evolving-humanize-zh
 注意：CoPaw 的 Skills Hub GitHub 导入不要使用 `.git` 后缀。推荐使用版本 tag URL：
 
 ```text
-https://github.com/TianyiDataScience/humanize/tree/v0.1.4
+https://github.com/TianyiDataScience/humanize/tree/v0.1.5
 ```
 
 仓库根 URL `https://github.com/TianyiDataScience/humanize` 也可以导入，但 `main` 分支可能受到 GitHub raw 缓存影响；公开分发时优先给 Hub URL 或 tag URL。

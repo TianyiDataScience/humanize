@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -36,6 +37,9 @@ from strategy_state import (  # noqa: E402
     state_directives,
 )
 
+DEFAULT_MAX_ROUNDS = 3
+MAX_ALLOWED_ROUNDS = 5
+
 
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,21 +64,32 @@ def candidate_rank_key(candidate: dict[str, Any]) -> tuple[int, float, float]:
     )
 
 
-def derive_run_budget(task: str, session_mode: str) -> dict[str, int]:
+def clamp_max_rounds(value: int | str | None) -> int:
+    if value is None or str(value).strip() == "":
+        return DEFAULT_MAX_ROUNDS
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_ROUNDS
+    return max(1, min(MAX_ALLOWED_ROUNDS, parsed))
+
+
+def derive_run_budget(task: str, session_mode: str, max_rounds_override: int | None = None) -> dict[str, int]:
     lowered = task.lower()
     is_email = "邮件" in task or "email" in lowered
     is_short_chat = "微信" in task or "wechat" in lowered or any(
         marker in task for marker in ("App", "APP", "推送", "直播课", "消息", "飞书")
     )
+    max_rounds = clamp_max_rounds(max_rounds_override if max_rounds_override is not None else os.environ.get("HUMANIZE_MAX_ROUNDS"))
     if session_mode == "rewrite" and is_email:
-        return {"challenger_count": 1, "max_rounds": 2}
+        return {"challenger_count": 1, "max_rounds": max_rounds}
     if session_mode == "rewrite":
-        return {"challenger_count": 2, "max_rounds": 2}
+        return {"challenger_count": 2, "max_rounds": max_rounds}
     if is_email:
-        return {"challenger_count": 2, "max_rounds": 1}
+        return {"challenger_count": 2, "max_rounds": max_rounds}
     if is_short_chat:
-        return {"challenger_count": 2, "max_rounds": 1}
-    return {"challenger_count": 2, "max_rounds": 2}
+        return {"challenger_count": 2, "max_rounds": max_rounds}
+    return {"challenger_count": 2, "max_rounds": max_rounds}
 
 
 def pick_best_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
@@ -120,6 +135,14 @@ def quality_gate_tags(candidate: dict[str, Any]) -> list[str]:
     return ordered
 
 
+def retryable_quality_tags(tags: list[str]) -> list[str]:
+    ordered: list[str] = []
+    for tag in tags:
+        if tag in QUALITY_GATE_RETRY_TAGS and tag not in ordered:
+            ordered.append(tag)
+    return ordered
+
+
 def should_continue_refinement(
     *,
     selected: dict[str, Any],
@@ -143,6 +166,7 @@ def build_trace_markdown(trace_payload: dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"- Session mode: `{trace_payload['session_mode']}`")
     lines.append(f"- Input mode: `{trace_payload['input_mode']}`")
+    lines.append(f"- Max rounds: `{trace_payload.get('run_budget', {}).get('max_rounds', DEFAULT_MAX_ROUNDS)}`")
     lines.append(f"- Total rounds: `{len(trace_payload['rounds'])}`")
     lines.append(f"- Improved any round: `{trace_payload['improved_any']}`")
     lines.append("")
@@ -222,6 +246,7 @@ def localize_reason(reason: str) -> str:
         "selected challenger improved and passed quality gate": "选中的 challenger 提升明显，且已经通过结果质量门",
         "selected challenger improved, but quality gate requested another round": "选中的 challenger 虽然提升明显，但还残留结构性问题，所以继续下一轮修复",
         "selected challenger improved, but round budget was exhausted": "选中的 challenger 已经提升，但轮次预算已用完，只能保留当前最优版本",
+        "selected challenger did not improve, but retryable quality issues remain": "选中的 challenger 没有提升，但仍有可重试的结构性问题，所以继续下一轮修复",
         "improvement below threshold": "提升幅度低于阈值",
         "challenger failed hard constraints": "challenger 未通过硬约束",
     }
@@ -350,6 +375,7 @@ def build_user_visible_summary(
     session_trace: list[dict[str, Any]],
     report_html_path: str,
     trace_path: str,
+    run_budget: dict[str, Any] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("# Humanize 优化摘要")
@@ -364,6 +390,8 @@ def build_user_visible_summary(
     lines.append(f"- 原因：{localize_reason(compare_payload['reason'])}")
     lines.append(f"- 分数变化：`{compare_payload['delta']}`")
     lines.append(f"- 保留阈值：`{compare_payload['margin']}`")
+    if run_budget:
+        lines.append(f"- 最大轮数：`{run_budget.get('max_rounds')}`（通过质量门会提前停止）")
     lines.append("")
     winner_text = challenger_text if compare_payload.get("winner") == "challenger" else baseline_text
     lines.append("## 最终结果")
@@ -1047,6 +1075,11 @@ def _generic_template_repair_replacements(*, natural: bool) -> list[tuple[str, s
         (r"组织协同体系", "团队协作方式"),
         (r"感谢您的理解与支持", "谢谢您的理解"),
         (r"感谢您的耐心等待", "感谢您的耐心"),
+        (r"已经高度重视并同步相关部门进行综合核实", "已经在和相关同事核实"),
+        (r"高度重视并同步相关部门进行综合核实", "在和相关同事核实"),
+        (r"正在有序推进中", "还在推进中"),
+        (r"为您提供完整处理结果", "把处理结果同步给您"),
+        (r"持续为您提供优质服务", "继续跟进这件事"),
         (r"欢迎随时与我们联系", "欢迎随时联系我"),
         (r"我们将竭诚为您服务", "我会继续跟进"),
     ]
@@ -1291,6 +1324,10 @@ def rewrite_longform_copy(
         (r"目前包裹正在加急转运途中，具体送达时效以物流页面更新为准。?", "目前包裹还在加急转运，具体什么时候送到，还要以物流更新为准。"),
         (r"给您带来的不便我们深表歉意，感谢您的理解与支持，如后续您有任何疑问，欢迎随时与我们联系。?", "给您添麻烦了，确实不好意思。后面如果还有问题，随时找我。"),
         (r"关于您反馈的退款诉求，我们已经第一时间提交相关部门进行核实处理。?", "您反馈的退款问题我们已经提交处理了。"),
+        (r"针对您反馈的退款诉求，我们已经高度重视并同步相关部门进行综合核实。?", "您反馈的退款问题，我这边已经在和相关同事核实了。"),
+        (r"针对您反馈的([^，。]{1,30})，我们已经高度重视并同步相关部门进行综合核实。?", r"您反馈的\1，我这边已经在和相关同事核实了。"),
+        (r"当前([^，。]{1,24})正在有序推进中，请您耐心等待，我们会在确认后第一时间为您提供完整处理结果。?", r"目前\1还在推进中，有结果后我会尽快同步给您。"),
+        (r"感谢您的理解与支持，我们将持续为您提供优质服务。?", "谢谢您的理解，我也会继续跟进这件事。"),
         (r"后续将在规定时效内为您同步最新进展，请您耐心等待。?", "这边有进展我会及时同步给您，您不用反复催。"),
         (r"感谢您的理解与支持，祝您生活愉快。?", "也谢谢您理解。"),
         (r"亲爱的各位伙伴，大家好。?", "大家好，"),
@@ -1669,6 +1706,10 @@ def cleanup_common_phrase_collisions(text: str) -> str:
     cleaned = text
     replacements = [
         (
+            r"稍后前(?=给|向|为|把|会|同步|回复)",
+            "稍后",
+        ),
+        (
             r"感谢您的耐心，如后续[^。！？]*如有需要，欢迎随时联系我。?",
             "感谢您的耐心，如有其他问题，欢迎随时联系我。",
         ),
@@ -1859,6 +1900,12 @@ def main() -> None:
     parser.add_argument("--challenger-text", default=None)
     parser.add_argument("--run-dir", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=Path("./runs"))
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=None,
+        help=f"Maximum optimization rounds, clamped to 1..{MAX_ALLOWED_ROUNDS}. Defaults to {DEFAULT_MAX_ROUNDS} or HUMANIZE_MAX_ROUNDS.",
+    )
     args = parser.parse_args()
 
     if args.text is None and args.input is None:
@@ -1997,7 +2044,7 @@ def main() -> None:
     session_trace: list[dict[str, Any]] = []
     selected_candidates: list[dict[str, Any]] = []
     improved_any = False
-    run_budget = derive_run_budget(task, session_mode)
+    run_budget = derive_run_budget(task, session_mode, args.max_rounds)
     max_rounds = int(run_budget["max_rounds"])
     challenger_count = int(run_budget["challenger_count"])
 
@@ -2162,6 +2209,13 @@ def main() -> None:
             selected_score = selected["score"]
             delta = float(selected_score["final_score"]) - float(current_best_score.final_score)
             improved = (not selected_score["hard_fail"]) and delta >= margin
+            force_retry_with_model = should_force_model_retry(
+                session_mode=session_mode,
+                round_number=round_number,
+                max_rounds=max_rounds,
+                round_candidates=round_candidates,
+                heuristic_variants=heuristic_variants,
+            )
             continue_requested, quality_gate_tags_out = should_continue_refinement(
                 selected=selected,
                 delta=delta,
@@ -2186,17 +2240,18 @@ def main() -> None:
                 next_failure_tags = []
                 next_step = "stop"
             else:
-                decision = "discard"
-                reason = "selected challenger did not improve enough"
                 next_failure_tags = aggregate_failure_tags(round_candidates, selected)
-                next_step = "stop"
-            force_retry_with_model = should_force_model_retry(
-                session_mode=session_mode,
-                round_number=round_number,
-                max_rounds=max_rounds,
-                round_candidates=round_candidates,
-                heuristic_variants=heuristic_variants,
-            )
+                retry_tags = retryable_quality_tags(next_failure_tags)
+                if round_number < max_rounds and retry_tags:
+                    decision = "continue"
+                    reason = "selected challenger did not improve, but retryable quality issues remain"
+                    next_failure_tags = retry_tags
+                    quality_gate_tags_out = retry_tags
+                    next_step = "continue"
+                else:
+                    decision = "discard"
+                    reason = "selected challenger did not improve enough"
+                    next_step = "stop"
 
             round_payload = {
                 "round": round_number,
@@ -2242,6 +2297,8 @@ def main() -> None:
                 break
 
             current_failure_tags = next_failure_tags
+            if decision == "continue":
+                continue
             if improved_any or round_number >= max_rounds:
                 break
             if force_retry_with_model:
@@ -2352,6 +2409,7 @@ def main() -> None:
         session_trace=session_trace,
         report_html_path=str(report_html_path.resolve()),
         trace_path=str(session_trace_path.resolve()),
+        run_budget=run_budget,
     )
     write_text(user_visible_md_path, user_visible_summary)
     write_text(user_visible_html_path, build_user_visible_html(user_visible_summary))

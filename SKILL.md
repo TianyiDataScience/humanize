@@ -2,7 +2,7 @@
 name: humanize
 description: Use this skill when the user wants to generate or optimize Chinese communication copy so it sounds more human, more natural, less templated, and less like polished AI writing. 中文文案去 AI 味和人味优化 skill，适合自媒体文案、客户邮件、微信回复、售后沟通、面试跟进、上级汇报、产品宣传和社群通知。The user normally only needs to provide the task and constraints. If they also provide an original draft, the skill switches to rewrite mode automatically.
 metadata:
-  version: "0.1.4"
+  version: "0.1.5"
   copaw:
     emoji: "📝"
     requires:
@@ -81,7 +81,7 @@ Optional:
 Default assumptions for V1:
 
 - `goal`: built in, unless the user explicitly overrides it
-- `rounds`: `1` full visible comparison round
+- `max_rounds`: defaults to `3`, and stops early when the quality gate passes
 - `style_notes`: infer from the task and constraints unless the user adds special tone requirements
 - `session_mode`: `generate` unless the user provides an original draft
 
@@ -245,11 +245,10 @@ Mode behavior:
 
 - If the user provided an original draft, `run_from_brief.py` automatically uses the original draft as baseline and only auto-generates the challenger unless explicitly overridden.
 - If the user did not provide an original draft, `run_from_brief.py` automatically generates both baseline and challenger unless explicitly overridden.
-- The iteration budget is adaptive:
-  - `rewrite + 邮件` defaults to `1` challenger round for responsiveness
-  - most `rewrite` runs default to `2` challengers and `1` round
-  - most `generate` runs default to `2` challengers and up to `2` rounds
-- The retry round is driven by failure tags such as missing facts, wrong audience, too-short copy, or no improvement.
+- The iteration budget defaults to `max_rounds=3`; this is a ceiling, not a requirement to run all rounds.
+- The run stops early when the selected candidate improves beyond the margin and passes the quality gate.
+- To override the ceiling, call `python3 humanize.py --max-rounds 5 --text "..."` or set `HUMANIZE_MAX_ROUNDS=5`. Values are clamped to `1..5`.
+- Extra rounds are driven by failure tags such as copied baseline, source-template carryover, bad splice, placeholder output, or over-compression.
 - The skill persists a lightweight strategy state under `${COPAW_WORKING_DIR:-~/.copaw}/models/humanize/strategy-state.json`.
 - At the end, prefer showing `user_visible_summary_markdown` directly to the user instead of only listing file paths.
 - `run_from_brief.py` now prints a human-readable process summary to stdout before the JSON payload. Prefer relaying that summary directly.
