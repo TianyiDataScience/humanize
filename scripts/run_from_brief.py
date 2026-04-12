@@ -2410,6 +2410,13 @@ def main() -> None:
     }
     result_json_path = run_dir / "result.json"
     write_json(result_json_path, payload_out)
+    print("=== HUMANIZE_AGENT_RELAY_INSTRUCTION_BEGIN ===")
+    print(
+        "下面 HUMANIZE_FINAL_RESPONSE 标记中间的 markdown 是最终用户答案；"
+        "请原样粘贴给用户，不要总结、不要改写、不要只给最终文案。"
+    )
+    print("如果输出被截断，请读取并原样返回 user-visible.md。")
+    print("=== HUMANIZE_AGENT_RELAY_INSTRUCTION_END ===")
     print("=== HUMANIZE_FINAL_RESPONSE_BEGIN ===")
     print(user_visible_summary)
     print("=== HUMANIZE_FINAL_RESPONSE_END ===")

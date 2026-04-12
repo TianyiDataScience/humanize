@@ -2,7 +2,7 @@
 name: humanize
 description: Use this skill when the user wants to generate or optimize Chinese communication copy so it sounds more human, more natural, less templated, and less like polished AI writing. 中文文案去 AI 味和人味优化 skill，适合自媒体文案、客户邮件、微信回复、售后沟通、面试跟进、上级汇报、产品宣传和社群通知。The user normally only needs to provide the task and constraints. If they also provide an original draft, the skill switches to rewrite mode automatically.
 metadata:
-  version: "0.1.3"
+  version: "0.1.4"
   copaw:
     emoji: "📝"
     requires:
@@ -15,7 +15,9 @@ metadata:
 > Lower-level scripts still work via: `cd {this_skill_dir} && python3 scripts/...`
 > The runtime and model cache live under `${COPAW_WORKING_DIR:-~/.copaw}/models/humanize/`.
 > In agent shell calls, prefer one-line commands. Do not paste backslash-continued multi-line commands. Always set the shell tool timeout to at least `120` seconds for `python3 humanize.py`.
-> Final relay rule: if `python3 humanize.py ...` prints `=== HUMANIZE_FINAL_RESPONSE_BEGIN ===` / `=== HUMANIZE_FINAL_RESPONSE_END ===`, return exactly the markdown between them as the final answer. Do not summarize it or add any explanation.
+> 用户可见输出硬规则：如果 `python3 humanize.py ...` 打印 `=== HUMANIZE_FINAL_RESPONSE_BEGIN ===` / `=== HUMANIZE_FINAL_RESPONSE_END ===`，这两个标记中间的 markdown 就是最终答案。必须原样粘贴给用户，不能总结、不能改写、不能只给最终文案、不能写“已经帮你优化完成了”。用户要看的就是完整过程。
+> Final relay rule: if `python3 humanize.py ...` prints `=== HUMANIZE_FINAL_RESPONSE_BEGIN ===` / `=== HUMANIZE_FINAL_RESPONSE_END ===`, return exactly the markdown between them as the final answer. Do not summarize it, do not paraphrase it, and do not add any explanation.
+> Fallback relay rule: if the shell output is truncated or the final response block is not visible, open the latest `user-visible.md` in the run directory and return that markdown exactly.
 > Invocation rule: do not build helper JSON or temporary Python snippets to call this skill. Invoke `python3 humanize.py` directly.
 > Forbidden invocation: do not call `copaw skills run humanize`, `python -m skills.humanize...`, or any package-style wrapper. Do not pass `--mode`; rewrite mode is inferred automatically from the full `--text` request or `--original`. They are not the canonical entrypoint for this skill.
 > Preservation rule: pass the user's full request verbatim via `--text` by default. If the request contains `原文`, `原稿`, `正文`, `draft`, or a long draft body, never reinterpret it into separate `--task` / `--constraints` arguments and never drop the original draft.
