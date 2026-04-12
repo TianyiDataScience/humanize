@@ -2,7 +2,7 @@
 name: humanize
 description: Use this skill when the user wants to generate or optimize Chinese communication copy so it sounds more human, more natural, less templated, and less like polished AI writing. 中文文案去 AI 味和人味优化 skill，适合自媒体文案、客户邮件、微信回复、售后沟通、面试跟进、上级汇报、产品宣传和社群通知。The user normally only needs to provide the task and constraints. If they also provide an original draft, the skill switches to rewrite mode automatically.
 metadata:
-  version: "0.1.2"
+  version: "0.1.3"
   copaw:
     emoji: "📝"
     requires:
