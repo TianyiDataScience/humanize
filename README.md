@@ -259,13 +259,19 @@ CoPaw 技能页面里几个入口的可靠性不一样：
 
 1. 把这个项目发布成公开 GitHub 仓库。
 2. 确保仓库根目录有 `SKILL.md`、`README.md`、`LICENSE`，不要把本地模型、runs、logs 提交进去。
-3. 让用户在 CoPaw 里点「从 Skills Hub 导入技能」，输入 GitHub 仓库 URL。
+3. 让用户在 CoPaw 里点「从 Skills Hub 导入技能」，输入 GitHub 仓库 URL：`https://github.com/TianyiDataScience/humanize`。
 4. 如果 CoPaw / Skills Hub 有公开索引或提交入口，再把仓库提交进去，这样用户才可能直接搜索到 `humanize`。
 5. 同时提供 zip release，作为离线安装和临时测试的备用方案。
 
 一句话：
 
 > GitHub URL 导入能保证“可安装”；进入 Skills Hub 索引，才能保证“可搜索”。
+
+注意：CoPaw 的 Skills Hub GitHub 导入不要使用 `.git` 后缀。实测可用的是：
+
+```text
+https://github.com/TianyiDataScience/humanize
+```
 
 如果只是把 skill 同步到你自己的本地技能池，其他用户不会看到。
 

@@ -222,7 +222,7 @@ def load_model_bundle(model_path: Path | None = None) -> dict[str, Any]:
     model = AutoModelForSequenceClassification.from_pretrained(resolved)
     device = default_device()
     model.to(device)
-    model.eval()
+    getattr(model, "eval")()
     bundle = {"tokenizer": tokenizer, "model": model, "device": device}
     _MODEL_BUNDLE[key] = bundle
     return bundle
