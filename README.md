@@ -261,7 +261,7 @@ CoPaw 技能页面里几个入口的可靠性不一样：
 2. 确保仓库根目录有 `SKILL.md`、`README.md`、`LICENSE`，不要把本地模型、runs、logs 提交进去。
 3. 把 skill 发布到 Skills Hub / ClawHub，这样 CoPaw 用户才能在界面里搜索和导入。
 4. 让用户在 CoPaw 里点「从 Skills Hub 导入技能」，优先搜索或输入：`https://clawhub.ai/self-evolving-humanize-zh`。
-5. 如果 Hub 暂时不可用，再使用 GitHub 稳定版本 URL：`https://github.com/TianyiDataScience/humanize/tree/v0.1.1`。
+5. 如果 Hub 暂时不可用，再使用 GitHub 稳定版本 URL：`https://github.com/TianyiDataScience/humanize/tree/v0.1.2`。
 6. 同时提供 zip release，作为离线安装和临时测试的备用方案。
 
 一句话：
@@ -283,7 +283,7 @@ self-evolving-humanize-zh
 注意：CoPaw 的 Skills Hub GitHub 导入不要使用 `.git` 后缀。推荐使用版本 tag URL：
 
 ```text
-https://github.com/TianyiDataScience/humanize/tree/v0.1.1
+https://github.com/TianyiDataScience/humanize/tree/v0.1.2
 ```
 
 仓库根 URL `https://github.com/TianyiDataScience/humanize` 也可以导入，但 `main` 分支可能受到 GitHub raw 缓存影响；公开分发时优先给 Hub URL 或 tag URL。
