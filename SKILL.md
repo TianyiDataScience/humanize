@@ -2,7 +2,7 @@
 name: humanize
 description: Use this skill when the user wants to generate or optimize Chinese communication copy so it sounds more human, more natural, less templated, and less like polished AI writing. Covers customer replies, manager updates, interview follow-ups, after-sales replies, WeChat-style messages, and short Chinese emails. The user normally only needs to provide the task and constraints. If they also provide an original draft, the skill switches to rewrite mode automatically.
 metadata:
-  version: "0.1.0"
+  version: "0.1.1"
   copaw:
     emoji: "📝"
     requires:
