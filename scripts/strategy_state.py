@@ -15,7 +15,11 @@ PROFILE_LIBRARY: dict[str, str] = {
     "direct": "更直接、简短、利落，减少铺垫和套话。",
     "concise": "尽量短，但不能丢事实、时间点和对象感。",
     "repair": "专门修复上一轮失败原因，优先满足 must_include、对象、长度等硬约束。",
+    "direct-rewrite": "主模型直接改写原文，只作为候选进入统一评分池。",
+    "direct-repair": "主模型基于 best-so-far 修复残留问题，只作为候选进入统一评分池。",
 }
+
+ADAPTIVE_PROFILE_NAMES = {"steady", "natural", "reassuring", "direct", "concise", "repair"}
 
 
 def _timestamp() -> str:
@@ -103,7 +107,11 @@ def choose_profiles(
     failure_tags: list[str],
     round_index: int,
 ) -> list[str]:
-    preferred = list(state.get("generation", {}).get("preferred_profiles") or [])
+    preferred = [
+        name
+        for name in list(state.get("generation", {}).get("preferred_profiles") or [])
+        if name in ADAPTIVE_PROFILE_NAMES
+    ]
     count = int(state.get("generation", {}).get("challenger_count") or 4)
     scored_profiles: list[tuple[float, int, str]] = []
     for index, name in enumerate(preferred):
@@ -238,13 +246,17 @@ def evolve_after_attempts(
     profile_stats = next_state.setdefault("profile_stats", {}).setdefault(chosen_profile, {"wins": 0, "losses": 0})
     if improved:
         profile_stats["wins"] = int(profile_stats.get("wins") or 0) + 1
-        next_state["last_success_profile"] = chosen_profile
+        if chosen_profile in ADAPTIVE_PROFILE_NAMES:
+            next_state["last_success_profile"] = chosen_profile
         next_state["last_failure_tags"] = []
         preferred = list(next_state.get("generation", {}).get("preferred_profiles") or [])
-        if chosen_profile in preferred:
-            preferred.remove(chosen_profile)
-        preferred.insert(0, chosen_profile)
+        preferred = [name for name in preferred if name in ADAPTIVE_PROFILE_NAMES]
         next_state["generation"]["preferred_profiles"] = preferred
+        if chosen_profile in ADAPTIVE_PROFILE_NAMES:
+            if chosen_profile in preferred:
+                preferred.remove(chosen_profile)
+            preferred.insert(0, chosen_profile)
+            next_state["generation"]["preferred_profiles"] = preferred
     else:
         profile_stats["losses"] = int(profile_stats.get("losses") or 0) + 1
         next_state["last_failure_tags"] = list(failure_tags)

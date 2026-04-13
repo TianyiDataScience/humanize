@@ -46,11 +46,20 @@ This skill then:
 2. Normalizes the user's input into a spec and session mode
 3. Creates a run folder with the spec and drafts
 4. Generates a baseline when the user did not provide one
-5. Generates multiple challenger drafts with different profiles
-6. Scores each candidate locally with the official scorer
-7. Uses failure tags to repair the next round if nothing improved
-8. Persists a small strategy state so the next run starts from the better policy bias
-9. Records each round in JSON and renders a visible report so the process is inspectable
+5. In rewrite mode, adds `direct-rewrite` from the current main model to the candidate pool
+6. Generates heuristic challenger drafts such as `heuristic-natural` and `heuristic-balanced`
+7. Scores every candidate in one unified pool with the official local scorer
+8. If the best candidate improves but fails the quality gate, repairs best-so-far with `direct-repair` plus heuristic repair candidates
+9. Persists a small strategy state so the next run starts from the better policy bias
+10. Records each round in JSON and renders a visible report so the process is inspectable
+
+V2 product rule:
+
+```text
+humanize is not competing against the main model's direct rewrite.
+It includes the main model's direct rewrite in the candidate pool,
+then uses the local scorer + repair loop to choose the steadier version.
+```
 
 ## First Run
 
@@ -167,9 +176,10 @@ Unless the user explicitly asks for a different mode, always:
 2. If `session_mode = generate`, generate exactly one baseline draft from task + constraints
 3. If `session_mode = rewrite`, treat the user's original message as `baseline`
 4. Generate multiple challenger drafts with different profiles
-5. If the first challenger set does not improve, run one repair retry round using the failure tags
-6. Run the full visible session
-7. Show the user:
+5. In rewrite mode, include `direct-rewrite` as a candidate, not as the automatic return value
+6. If the best candidate improves but still fails the quality gate, run repair from best-so-far with `direct-repair` plus heuristic repairs
+7. Run the full visible session
+8. Show the user:
    - baseline text
    - every round's candidate texts
    - final challenger text
@@ -190,7 +200,7 @@ When the skill runs, always reveal the optimization process by default.
 After the official run finishes, do not append a second manual rewrite that overrides the skill result.
 Relay the official humanize output first. Only provide an extra manual suggestion if the user explicitly asks for another variant.
 
-For normal CoPaw execution, call the skill with the raw user request:
+For normal QwenPaw / CoPaw execution, call the skill with the raw user request:
 
 ```bash
 cd {this_skill_dir} && python3 humanize.py --text "{entire_user_request}" --output-root ./runs
@@ -221,7 +231,7 @@ you should still follow the full visible session flow automatically.
 Preferred single-entry command:
 
 ```bash
-cd {this_skill_dir} && python3 humanize.py --task "给催进度客户发微信回复" --constraints "保留“明天下午”和“财务”，控制在90字内" --output-root ./runs
+cd {this_skill_dir} && python3 humanize.py --text "用 humanize 帮我生成并优化一条中文沟通消息。任务：给催进度客户发微信回复。约束：保留“明天下午”和“财务”，控制在90字内。" --output-root ./runs
 ```
 
 This command:
@@ -244,6 +254,8 @@ This command:
 Mode behavior:
 
 - If the user provided an original draft, `run_from_brief.py` automatically uses the original draft as baseline and only auto-generates the challenger unless explicitly overridden.
+- In rewrite mode, Round 1 defaults to `direct-rewrite` + `heuristic-natural` + `heuristic-balanced` when a generation backend is available.
+- In rewrite repair rounds, the model repair candidate is `direct-repair`, based on best-so-far rather than a fresh rewrite from the original.
 - If the user did not provide an original draft, `run_from_brief.py` automatically generates both baseline and challenger unless explicitly overridden.
 - The iteration budget defaults to `max_rounds=3`; this is a ceiling, not a requirement to run all rounds.
 - The run stops early when the selected candidate improves beyond the margin and passes the quality gate.
@@ -254,7 +266,7 @@ Mode behavior:
 - `run_from_brief.py` now prints a human-readable process summary to stdout before the JSON payload. Prefer relaying that summary directly.
 - When relaying results, do not collapse the run into a one-line summary. Show baseline, round-by-round candidates, scores, failure tags, selected candidate, and the final decision by default.
 - `--baseline-text` and `--challenger-text` are optional override hooks for debugging, not the default UX.
-- In rewrite mode, prefer `--original-draft`. Do not substitute it with `--baseline-text` during normal use.
+- In rewrite mode, prefer passing the full raw request through `--text`. Do not split a request containing `原文` into `--task` / `--constraints` / `--original-draft` unless you are explicitly debugging parser behavior.
 
 If you need to inspect planning before running the score, prepare the run first.
 This is a debug-only path, not the default user flow:

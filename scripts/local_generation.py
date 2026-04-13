@@ -48,17 +48,23 @@ def _active_generation_timeout() -> float:
                 return value
         except ValueError:
             pass
-    return 25.0
+    return 60.0
 
 
 def _subprocess_json(args: list[str], timeout: float = 30.0) -> dict[str, Any]:
-    proc = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=True,
-    )
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        stdout = (exc.stdout or "").strip()
+        detail = stderr or stdout or str(exc)
+        raise RuntimeError(f"Subprocess failed: {detail}") from exc
     stdout = (proc.stdout or "").strip()
     if not stdout:
         raise RuntimeError("Subprocess returned empty stdout")
@@ -150,17 +156,43 @@ def discover_base_url() -> str:
     if base_url:
         return base_url.rstrip("/")
 
-    log_path = copaw_working_dir() / "copaw.log"
-    if log_path.exists():
-        text = log_path.read_text(encoding="utf-8", errors="ignore")
-        matches = re.findall(r"http://127\.0\.0\.1:(\d+)/health", text)
-        if matches:
-            port = matches[-1]
-            return f"http://127.0.0.1:{port}/v1"
-        matches = re.findall(r"llama\.cpp server started on port (\d+)", text)
-        if matches:
-            port = matches[-1]
-            return f"http://127.0.0.1:{port}/v1"
+    candidates: list[str] = []
+    log_paths = [
+        copaw_working_dir() / "copaw.log",
+        copaw_working_dir() / "qwenpaw.log",
+        Path.home() / ".qwenpaw" / "qwenpaw-app.log",
+    ]
+    for log_path in log_paths:
+        if log_path.exists():
+            text = log_path.read_text(encoding="utf-8", errors="ignore")
+            for port in re.findall(r"http://127\.0\.0\.1:(\d+)/health", text):
+                candidates.append(f"http://127.0.0.1:{port}/v1")
+            for port in re.findall(r"llama\.cpp server started on port (\d+)", text):
+                candidates.append(f"http://127.0.0.1:{port}/v1")
+
+    provider_dir = Path.home() / ".copaw.secret" / "providers" / "builtin"
+    for provider_id in ("qwenpaw-local", "copaw-local"):
+        provider_path = provider_dir / f"{provider_id}.json"
+        if not provider_path.exists():
+            continue
+        try:
+            payload = json.loads(provider_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        provider_base_url = str(payload.get("base_url") or "").strip()
+        if provider_base_url:
+            candidates.append(provider_base_url.rstrip("/"))
+
+    seen: set[str] = set()
+    for candidate in reversed(candidates):
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            ensure_endpoint_ready(candidate)
+            return candidate
+        except Exception:
+            continue
 
     return "http://127.0.0.1:54841/v1"
 
@@ -226,6 +258,9 @@ def extract_content(response: dict[str, Any]) -> str:
     message = choices[0].get("message") or {}
     content = str(message.get("content") or "").strip()
     if content:
+        marker_matches = re.findall(r"FINAL_CANDIDATE:\s*(.+)", content)
+        if marker_matches:
+            return marker_matches[-1].strip(" “\"'”")
         return content
 
     reasoning = str(message.get("reasoning_content") or "").strip()
@@ -334,6 +369,71 @@ def _guidance_lines(
     if failure_tags:
         lines.append("- 上一轮失败标签：" + "、".join(failure_tags))
     return lines
+
+
+def _compact_constraints_for_direct(hard_constraints: dict[str, Any]) -> str:
+    lines = _constraint_lines(hard_constraints)
+    if not lines:
+        return ""
+    return "硬约束：\n" + "\n".join(lines) + "\n"
+
+
+def build_direct_rewrite_prompt(
+    *,
+    task: str,
+    hard_constraints: dict[str, Any],
+    source_text: str,
+) -> tuple[str, str]:
+    system = (
+        "你是中文文案直改器。\n"
+        "只输出改写后的正文，不要解释，不要标题，不要项目符号。\n"
+        "如果底层模型会把内容拆成 reasoning_content，最后一行必须写成 FINAL_CANDIDATE: <改写后的正文>。"
+    )
+    constraints = _compact_constraints_for_direct(hard_constraints)
+    user = (
+        f"任务：{task}\n"
+        f"{constraints}"
+        "原文：\n"
+        f"{source_text}\n\n"
+        "你只需要把这段文本改得更像真人会写的话。\n"
+        "保留原意和必要事实。\n"
+        "减少模板腔、客服腔、公告腔、AI 味。\n"
+        "只输出改写后的正文。"
+    )
+    return system, user
+
+
+def build_direct_repair_prompt(
+    *,
+    task: str,
+    hard_constraints: dict[str, Any],
+    source_text: str,
+    current_best_text: str,
+    failure_tags: list[str] | None = None,
+) -> tuple[str, str]:
+    system = (
+        "你是中文文案修复器。\n"
+        "只输出修复后的正文，不要解释，不要标题，不要项目符号。\n"
+        "如果底层模型会把内容拆成 reasoning_content，最后一行必须写成 FINAL_CANDIDATE: <修复后的正文>。"
+    )
+    constraints = _compact_constraints_for_direct(hard_constraints)
+    failure_line = "残留问题：" + "、".join(failure_tags or []) + "\n" if failure_tags else ""
+    user = (
+        f"任务：{task}\n"
+        f"{constraints}"
+        f"{failure_line}"
+        "原文只作为事实参照，不要从原文重写：\n"
+        f"{source_text}\n\n"
+        "当前最佳版本：\n"
+        f"{current_best_text}\n\n"
+        "这是当前最佳版本，不要从原文重写。\n"
+        "只修残留问题。\n"
+        "保留已经自然的表达。\n"
+        "减少残留的模板腔、客服腔、公告腔、AI 味。\n"
+        "保留原意和必要事实。\n"
+        "只输出修复后的正文。"
+    )
+    return system, user
 
 
 def build_generation_prompts(

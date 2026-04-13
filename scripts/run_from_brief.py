@@ -18,6 +18,8 @@ from runtime_common import reexec_into_runtime
 reexec_into_runtime()
 
 from local_generation import (  # noqa: E402
+    build_direct_repair_prompt,
+    build_direct_rewrite_prompt,
     build_generation_prompts,
     call_chat,
     discover_generation_backend,
@@ -198,14 +200,15 @@ def build_trace_markdown(trace_payload: dict[str, Any]) -> str:
         lines.append(f"- Next step: `{round_payload.get('next_step', 'stop')}`")
         lines.append(f"- Delta: `{round_payload['delta']}`")
         lines.append("")
-        lines.append("| Candidate | Profile | Final | Rules | Hard Fail | Failure Tags |")
-        lines.append("| --- | --- | ---: | ---: | --- | --- |")
+        lines.append("| Candidate | Profile | Source | Final | Rules | Hard Fail | Failure Tags |")
+        lines.append("| --- | --- | --- | ---: | ---: | --- | --- |")
         for candidate in round_payload["candidates"]:
             score = candidate.get("score") or {}
             lines.append(
                 "| "
                 f"{candidate['candidate_index']} | "
                 f"{candidate['profile']} | "
+                f"{candidate.get('source_kind', 'unknown')} | "
                 f"{float(score.get('final_score') or 0.0):.6f} | "
                 f"{float(score.get('rule_score') or 0.0):.6f} | "
                 f"{bool(score.get('hard_fail', False))} | "
@@ -255,15 +258,28 @@ def localize_reason(reason: str) -> str:
 
 def localize_profile(profile: str) -> str:
     mapping = {
-        "repair": "修复",
-        "steady": "稳健",
-        "reassuring": "安抚",
-        "natural": "自然",
-        "direct": "直接",
-        "heuristic-natural": "启发式-自然",
-        "heuristic-balanced": "启发式-平衡",
+        "repair": "repair（模型修复）",
+        "steady": "steady（模型稳健版）",
+        "reassuring": "reassuring（模型安抚版）",
+        "natural": "natural（模型自然版）",
+        "direct": "direct（模型直接版）",
+        "direct-rewrite": "direct-rewrite（主模型直改）",
+        "direct-repair": "direct-repair（主模型修复 best-so-far）",
+        "heuristic-natural": "heuristic-natural（启发式自然版）",
+        "heuristic-balanced": "heuristic-balanced（启发式平衡版）",
+        "manual-override": "manual-override（手动候选）",
     }
     return mapping.get(profile, profile)
+
+
+def localize_source_kind(source_kind: str) -> str:
+    mapping = {
+        "model_direct": "主模型直出候选",
+        "heuristic": "启发式候选",
+        "model_repair": "主模型修复候选",
+        "manual_override": "手动候选",
+    }
+    return mapping.get(source_kind, source_kind or "未知")
 
 
 def localize_revision_mode(mode: str) -> str:
@@ -315,6 +331,8 @@ def localize_note(note: str) -> str:
         "generation error: recovered candidate was too short": "生成失败：回收得到的候选文本过短",
         "generation error: recovered candidate did not satisfy hard constraints": "生成失败：回收得到的候选文本未满足硬约束",
         "generation error: recovered placeholder candidate": "生成失败：回收得到的是占位候选文本",
+        "generation error: active model timed out": "生成失败：主模型直出超时",
+        "generation error: active model connection failed": "生成失败：主模型后端连接失败",
         "generation error: candidate recovery failed": "生成失败：候选文本恢复失败",
         "severe template carryover from source": "严重沿用了原文里的模板腔",
         "rewrite change is too small": "改写幅度太小，和原文仍然过近",
@@ -452,14 +470,15 @@ def build_user_visible_summary(
             f"- 继承的失败标签：`{localize_failure_tags(round_payload['failure_tags_in'])}`",
         )
         lines.append("")
-        lines.append("| 候选 | Profile | 总分 | 规则分 | 硬失败 | 失败标签 |")
-        lines.append("| --- | --- | ---: | ---: | --- | --- |")
+        lines.append("| 候选 | Profile | 来源 | 总分 | 规则分 | 硬失败 | 失败标签 |")
+        lines.append("| --- | --- | --- | ---: | ---: | --- | --- |")
         for candidate in round_payload["candidates"]:
             score = candidate.get("score") or {}
             lines.append(
                 "| "
                 f"{candidate['candidate_index']} | "
                 f"{localize_profile(candidate['profile'])} | "
+                f"{localize_source_kind(candidate.get('source_kind', ''))} | "
                 f"{float(score.get('final_score') or 0.0):.6f} | "
                 f"{float(score.get('rule_score') or 0.0):.6f} | "
                 f"{bool(score.get('hard_fail', False))} | "
@@ -469,7 +488,7 @@ def build_user_visible_summary(
         for candidate in round_payload["candidates"]:
             candidate_score = candidate.get("score") or {}
             lines.append(
-                f"候选 {candidate['candidate_index']} · `{localize_profile(candidate['profile'])}`",
+                f"候选 {candidate['candidate_index']} · `{localize_profile(candidate['profile'])}` · 来源：{localize_source_kind(candidate.get('source_kind', ''))}",
             )
             lines.append("")
             candidate_text = candidate.get("text") or ""
@@ -505,6 +524,10 @@ def compact_note(note: str) -> str:
     normalized = " ".join(str(note).split())
     if normalized.startswith("generation error:"):
         lowered = normalized.lower()
+        if "timed out" in lowered or "timeout" in lowered:
+            return "generation error: active model timed out"
+        if "connection error" in lowered or "connection attempts failed" in lowered:
+            return "generation error: active model connection failed"
         if "too short" in lowered:
             return "generation error: recovered candidate was too short"
         if "hard constraints" in lowered:
@@ -644,20 +667,39 @@ def recover_candidate_from_response(response: dict[str, Any], hard_constraints: 
 
     quoted = [
         item.strip()
-        for item in __import__("re").findall(r"[“\"「『]([^”\"」』\n]{8,140})[”\"」』]", reasoning)
+        for item in re.findall(r"[“\"「『]([^”\"」』\n]{8,140})[”\"」』]", reasoning)
         if item.strip()
     ]
     valid_quoted = [item for item in quoted if valid(item)]
     if valid_quoted:
         return max(valid_quoted, key=len)
 
-    labeled = __import__("re").findall(
+    labeled = re.findall(
         r"(?:最终文案|最终回复|最终候选|候选文案|草稿|建议文案)\s*[：:]\s*([^\n]{8,160})",
         reasoning,
     )
     valid_labeled = [item.strip(" “\"'”") for item in labeled if valid(item.strip(" “\"'”"))]
     if valid_labeled:
         return max(valid_labeled, key=len)
+
+    line_candidates: list[str] = []
+    for raw_line in reasoning.splitlines():
+        line = raw_line.strip(" -•\t")
+        if not line:
+            continue
+        if any(marker in line for marker in ("可以改成", "可以这样写", "改成：", "改写成：", "我觉得可以改成")):
+            quoted_line = [
+                item.strip()
+                for item in re.findall(r"[“\"「『]([^”\"」』\n]{8,220})[”\"」』]", line)
+                if item.strip()
+            ]
+            line_candidates.extend(item for item in quoted_line if valid(item))
+            if "：" in line:
+                tail = line.rsplit("：", 1)[1].strip(" “\"'”")
+                if valid(tail):
+                    line_candidates.append(tail)
+    if line_candidates:
+        return max(line_candidates, key=len)
 
     return ""
 
@@ -671,6 +713,37 @@ def is_placeholder_candidate(text: str) -> bool:
     if stripped in {"最终文案", "候选文案", "<最终文案>"}:
         return True
     return False
+
+
+def looks_unfinished_candidate(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if stripped.endswith(("，", "、", "：", "；", ",", ":", ";")):
+        return True
+    compact = stripped.replace(" ", "").replace("\n", "")
+    unfinished_endings = (
+        "放在",
+        "用在",
+        "写在",
+        "因为",
+        "如果",
+        "但是",
+        "不过",
+        "而且",
+        "并且",
+        "以及",
+        "或者",
+        "还是",
+        "然后",
+        "同时",
+        "为了",
+        "让你",
+        "让人",
+        "把它",
+        "比较",
+    )
+    return compact.endswith(unfinished_endings)
 
 
 def satisfies_hard_constraints(text: str, hard_constraints: dict[str, Any]) -> bool:
@@ -843,6 +916,9 @@ def call_and_extract_candidate(
         if is_placeholder_candidate(candidate):
             last_exc = RuntimeError(f"Recovered placeholder candidate: {candidate}")
             continue
+        if index < len(max_tokens_sequence) - 1 and looks_unfinished_candidate(candidate):
+            last_exc = RuntimeError(f"Recovered candidate looks unfinished: {candidate}")
+            continue
         if require_hard_constraints and not satisfies_hard_constraints(candidate, hard_constraints):
             last_exc = RuntimeError(f"Recovered candidate does not satisfy hard constraints: {candidate}")
             continue
@@ -878,23 +954,50 @@ def generate_candidate(
     current_best_score_value: float,
     enforce_continuity: bool,
 ) -> dict[str, Any]:
-    (_, _), (challenger_system, challenger_user) = build_generation_prompts(
-        task=task,
-        hard_constraints=hard_constraints,
-        original=source_text if session_mode == "rewrite" else "",
-        mode=session_mode,
-        challenger_profile=profile,
-        strategy_directives=strategy_directives,
-        failure_tags=failure_tags,
-        revision_mode=revision_mode,
-    )
+    is_direct_profile = profile in {"direct-rewrite", "direct-repair"}
+    if profile == "direct-rewrite":
+        challenger_system, challenger_user = build_direct_rewrite_prompt(
+            task=task,
+            hard_constraints=hard_constraints,
+            source_text=source_text,
+        )
+    elif profile == "direct-repair":
+        challenger_system, challenger_user = build_direct_repair_prompt(
+            task=task,
+            hard_constraints=hard_constraints,
+            source_text=source_text,
+            current_best_text=current_best_text,
+            failure_tags=failure_tags,
+        )
+    else:
+        (_, _), (challenger_system, challenger_user) = build_generation_prompts(
+            task=task,
+            hard_constraints=hard_constraints,
+            original=source_text if session_mode == "rewrite" else "",
+            mode=session_mode,
+            challenger_profile=profile,
+            strategy_directives=strategy_directives,
+            failure_tags=failure_tags,
+            revision_mode=revision_mode,
+        )
+    if is_direct_profile:
+        prompt_reference = current_best_text if profile == "direct-repair" else source_text
+        reference_len = len(re.sub(r"\s+", "", prompt_reference))
+        token_upper = min(1400, max(800, int(reference_len * 1.6) + 120))
+        max_tokens_sequence = sorted({420, min(800, token_upper), token_upper})
+        temperature = 0.25
+        formatted_user_prompt = challenger_user
+    else:
+        max_tokens_sequence = [220, 320, 420]
+        temperature = 0.35
+        formatted_user_prompt = challenger_user.format(baseline=current_best_text)
     candidate_text, response = call_and_extract_candidate(
         base_url=base_url,
         model=model,
         system_prompt=challenger_system,
-        user_prompt=challenger_user.format(baseline=current_best_text),
-        temperature=0.35,
-        max_tokens_sequence=[220, 320, 420],
+        user_prompt=formatted_user_prompt,
+        temperature=temperature,
+        max_tokens_sequence=max_tokens_sequence,
         hard_constraints=hard_constraints,
         require_hard_constraints=False,
         min_chars_hint=32 if ("邮件" in task or "email" in task.lower()) else (16 if "客户" in task else 12),
@@ -935,6 +1038,7 @@ def generate_candidate(
         {
             "candidate_path": str(candidate_path.resolve()),
             "generation_path": str(generation_path.resolve()),
+            "source_kind": "model_repair" if revision_mode == "repair" else "model_direct",
             **score_payload,
         },
     )
@@ -942,6 +1046,7 @@ def generate_candidate(
     return {
         "candidate_index": candidate_index,
         "profile": profile,
+        "source_kind": "model_repair" if revision_mode == "repair" else "model_direct",
         "text": candidate_text,
         "candidate_path": str(candidate_path.resolve()),
         "generation_path": str(generation_path.resolve()),
@@ -1918,12 +2023,14 @@ def build_heuristic_candidate(
             "candidate_path": str(candidate_path.resolve()),
             "generation_path": "",
             "heuristic": True,
+            "source_kind": "heuristic",
             **score_payload,
         },
     )
     return {
         "candidate_index": candidate_index,
         "profile": profile,
+        "source_kind": "heuristic",
         "text": cleaned_text,
         "candidate_path": str(candidate_path.resolve()),
         "generation_path": "",
@@ -2008,6 +2115,8 @@ def main() -> None:
     baseline_override = (args.baseline_text or "").strip()
     challenger_override = (args.challenger_text or "").strip()
     last_success_profile = str(state.get("last_success_profile") or "steady") or "steady"
+    if last_success_profile.startswith("direct-"):
+        last_success_profile = "steady"
     baseline_profile = last_success_profile if last_success_profile != "repair" else "steady"
     initial_directives = state_directives(state, [])
     (baseline_system, baseline_user), _ = build_generation_prompts(
@@ -2098,6 +2207,7 @@ def main() -> None:
         override_record = {
             "candidate_index": 1,
             "profile": "manual-override",
+            "source_kind": "manual_override",
             "text": challenger_override,
             "candidate_path": "",
             "generation_path": "",
@@ -2138,7 +2248,7 @@ def main() -> None:
     else:
         for round_index in range(max_rounds):
             round_number = round_index + 1
-            profiles = choose_profiles(state, current_failure_tags, round_index)[:challenger_count]
+            strategy_profiles = choose_profiles(state, current_failure_tags, round_index)[:challenger_count]
             directives = state_directives(state, current_failure_tags)
             round_candidates: list[dict[str, Any]] = []
             revision_mode = "repair" if session_mode == "rewrite" and improved_any else "rewrite"
@@ -2160,12 +2270,17 @@ def main() -> None:
             force_model_candidates = round_number > 1 and any(
                 tag in current_failure_tags for tag in QUALITY_GATE_RETRY_TAGS
             )
-            skip_model_candidates = (not force_model_candidates) and bool(heuristic_variants) and (
-                session_mode == "generate"
-                or looks_like_longform_rewrite(task, source_text)
-                or is_short_chat
-                or looks_like_professional_email(task, source_text)
-            )
+            if session_mode == "rewrite":
+                model_profiles = ["direct-repair" if revision_mode == "repair" else "direct-rewrite"]
+                skip_model_candidates = False
+            else:
+                skip_model_candidates = (not force_model_candidates) and bool(heuristic_variants) and (
+                    session_mode == "generate"
+                    or looks_like_longform_rewrite(task, source_text)
+                    or is_short_chat
+                    or looks_like_professional_email(task, source_text)
+                )
+                model_profiles = [] if skip_model_candidates else strategy_profiles
 
             if not generation_available:
                 write_json(
@@ -2176,8 +2291,8 @@ def main() -> None:
                         "message": "No generation backend was available; using heuristic candidates only.",
                     },
                 )
-            elif not skip_model_candidates:
-                for candidate_index, profile in enumerate(profiles, start=1):
+            elif model_profiles:
+                for candidate_index, profile in enumerate(model_profiles, start=1):
                     try:
                         candidate = generate_candidate(
                             run_dir=run_dir,
@@ -2202,6 +2317,7 @@ def main() -> None:
                         candidate = {
                             "candidate_index": candidate_index,
                             "profile": profile,
+                            "source_kind": "model_repair" if revision_mode == "repair" else "model_direct",
                             "text": "",
                             "candidate_path": "",
                             "generation_path": "",
@@ -2298,10 +2414,12 @@ def main() -> None:
 
             round_payload = {
                 "round": round_number,
-                "profiles": profiles,
+                "profiles": [str(candidate.get("profile") or "") for candidate in round_candidates],
                 "failure_tags_in": current_failure_tags,
                 "strategy_directives": directives,
+                "strategy_profiles": strategy_profiles,
                 "force_model_candidates": force_model_candidates,
+                "skip_model_candidates": skip_model_candidates,
                 "force_retry_with_model": force_retry_with_model,
                 "baseline_text": current_best_text,
                 "baseline_score": current_best_score.as_dict(),
@@ -2360,6 +2478,7 @@ def main() -> None:
         final_candidate = {
             "candidate_index": 0,
             "profile": "baseline",
+            "source_kind": "heuristic",
             "text": initial_baseline_text,
             "candidate_path": "",
             "generation_path": "",
