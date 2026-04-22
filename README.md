@@ -1,6 +1,6 @@
 # Humanize Skill
 
-一个中文文案「去 AI 味」skill，可以在 CoPaw、OpenClaw、Claude Code，或者任何能读取 `SKILL.md` 并执行本地 shell 命令的 agent 里使用。
+一个中文文案「去 AI 味」skill，可以在 CoPaw、OpenClaw、Claude Code、Hermes，或者任何能读取 `SKILL.md` 并执行本地 shell 命令的 agent 里使用。
 
 它的本体不是某个平台的私有插件，而是：
 
@@ -235,6 +235,18 @@ export HUMANIZE_LLM_BASE_URL=http://127.0.0.1:54841/v1
 export HUMANIZE_LLM_MODEL=<your-local-model-id>
 ```
 
+如果你用的是 Ollama 上的 thinking 模型，建议再加：
+
+```bash
+export HUMANIZE_LLM_REASONING_EFFORT=none
+```
+
+如果在 Apple 芯片机器上想避免 scorer 首次走 MPS 带来的等待，也可以固定：
+
+```bash
+export HUMANIZE_SCORER_DEVICE=cpu
+```
+
 更完整的开源模型和依赖说明见 [OPEN_SOURCE.md](./OPEN_SOURCE.md)。
 
 ### Best-so-far 迭代
@@ -395,7 +407,7 @@ git clone https://github.com/TianyiDataScience/humanize.git
 
 ## 在不同 agent 里怎么用
 
-### CoPaw / OpenClaw
+### CoPaw / OpenClaw / Hermes
 
 安装到 workspace 后，进入聊天窗口，直接说自然语言即可。
 
@@ -415,21 +427,31 @@ export HUMANIZE_LLM_MODEL=<your-local-model-id>
 
 没有可用生成模型时，会降级到 `heuristic-only`。
 
-### Claude Code
+### Claude Code / Hermes
 
-在 Claude Code 里打开这个仓库，然后直接让它按 `CLAUDE.md` 或 `SKILL.md` 调用：
+在 Claude Code、OpenClaw 或 Hermes 里打开这个仓库，然后直接让它按 `CLAUDE.md` / `OPENCLAW.md` / `HERMES.md` / `SKILL.md` 调用：
 
 ```bash
 python3 humanize.py --text "{完整用户请求}" --output-root ./runs
 ```
 
-不要让 Claude Code 手写 challenger，也不要自己主观挑 winner。它应该只调用官方入口，最终返回 `=== HUMANIZE_FINAL_RESPONSE_BEGIN ===` 和 `=== HUMANIZE_FINAL_RESPONSE_END ===` 中间的内容。
+不要让 Claude Code、OpenClaw 或 Hermes 手写 challenger，也不要自己主观挑 winner。它应该只调用官方入口，最终返回 `=== HUMANIZE_FINAL_RESPONSE_BEGIN ===` 和 `=== HUMANIZE_FINAL_RESPONSE_END ===` 中间的内容。
+
+如果这几个 agent 走的是本地 Ollama thinking 模型，环境变量建议是：
+
+```bash
+export HUMANIZE_GENERATION_BACKEND=local
+export HUMANIZE_LLM_BASE_URL=http://127.0.0.1:11434/v1
+export HUMANIZE_LLM_MODEL=<your-local-model-id>
+export HUMANIZE_LLM_REASONING_EFFORT=none
+export HUMANIZE_SCORER_DEVICE=cpu
+```
 
 ---
 
 ## 示例
 
-下面这些例子在 CoPaw / OpenClaw / Claude Code 里都可以用。区别只是 agent 怎么帮你执行 CLI。
+下面这些例子在 CoPaw / OpenClaw / Claude Code / Hermes 里都可以用。区别只是 agent 怎么帮你执行 CLI。
 
 ### 例子 1：客户催进度邮件
 
@@ -547,6 +569,8 @@ rewrite / generate 会自动推断：
 ├── OPEN_SOURCE.md
 ├── AGENTS.md
 ├── CLAUDE.md
+├── OPENCLAW.md
+├── HERMES.md
 ├── humanize.py
 ├── __main__.py
 ├── scripts/
@@ -615,7 +639,7 @@ python3 -m py_compile \
 所以当前命名策略是：
 
 - skill 内部名继续叫 `humanize`，便于 CoPaw 里自然调用。
-- 开源仓库使用你已经创建的 [`TianyiDataScience/humanize`](https://github.com/TianyiDataScience/humanize)，README 中明确它是 CoPaw / OpenClaw / Claude Code 可用的中文文案 humanize skill。
+- 开源仓库使用你已经创建的 [`TianyiDataScience/humanize`](https://github.com/TianyiDataScience/humanize)，README 中明确它是 CoPaw / OpenClaw / Claude Code / Hermes 可用的中文文案 humanize skill。
 
 这不是商标检索，只是公开仓库和本地 skill 名称层面的冲突检查。
 

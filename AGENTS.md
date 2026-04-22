@@ -9,6 +9,7 @@ CoPaw / OpenClaw 这类 agent 的使用方式本质相同：读取 `SKILL.md`，
 - CoPaw
 - OpenClaw
 - Claude Code
+- Hermes
 - 任何能读取 `SKILL.md` 并执行本地 shell 命令的 agent
 
 ## 规范入口
@@ -56,6 +57,18 @@ python3 humanize.py --text "{完整用户请求}" --output-root ./runs
 export HUMANIZE_GENERATION_BACKEND=local
 export HUMANIZE_LLM_BASE_URL=http://127.0.0.1:54841/v1
 export HUMANIZE_LLM_MODEL=<your-local-model-id>
+```
+
+如果你用的是 Ollama 上的 thinking 模型，建议再加：
+
+```bash
+export HUMANIZE_LLM_REASONING_EFFORT=none
+```
+
+如果在 Apple 芯片机器上想避免 scorer 首次走 MPS 带来的等待，也可以固定：
+
+```bash
+export HUMANIZE_SCORER_DEVICE=cpu
 ```
 
 没有生成模型时，系统会降级到 `heuristic-only`，常见模板化文案仍可跑完整流程。

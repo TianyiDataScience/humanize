@@ -21,7 +21,7 @@ metadata:
 > Invocation rule: do not build helper JSON or temporary Python snippets to call this skill. Invoke `python3 humanize.py` directly.
 > Forbidden invocation: do not call `copaw skills run humanize`, `python -m skills.humanize...`, or any package-style wrapper. Do not pass `--mode`; rewrite mode is inferred automatically from the full `--text` request or `--original`. They are not the canonical entrypoint for this skill.
 > Preservation rule: pass the user's full request verbatim via `--text` by default. If the request contains `原文`, `原稿`, `正文`, `draft`, or a long draft body, never reinterpret it into separate `--task` / `--constraints` arguments and never drop the original draft.
-> Compatibility rule: this skill is not CoPaw-only. CoPaw / OpenClaw style agents should use the same `SKILL.md + python3 humanize.py --text ...` flow. The CoPaw installer is only a convenience sync script for the currently known CoPaw workspace path, not a separate skill protocol. Claude Code and other local coding agents can invoke the same CLI after reading this `SKILL.md`.
+> Compatibility rule: this skill is not CoPaw-only. CoPaw / OpenClaw / Hermes style agents should use the same `SKILL.md + python3 humanize.py --text ...` flow. The CoPaw installer is only a convenience sync script for the currently known CoPaw workspace path, not a separate skill protocol. Claude Code and other local coding agents can invoke the same CLI after reading this `SKILL.md`.
 
 # Humanize
 

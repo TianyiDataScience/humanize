@@ -1,6 +1,6 @@
-# Claude Code 使用说明
+# Hermes 使用说明
 
-这个仓库可以直接在 Claude Code 中使用。
+这个仓库可以直接在 Hermes 中使用。
 
 当用户要求使用 `humanize` 优化中文文案时，执行：
 
@@ -26,7 +26,7 @@ python3 scripts/bootstrap_runtime.py
 
 ```bash
 export HUMANIZE_GENERATION_BACKEND=local
-export HUMANIZE_LLM_BASE_URL=http://127.0.0.1:54841/v1
+export HUMANIZE_LLM_BASE_URL=http://127.0.0.1:11434/v1
 export HUMANIZE_LLM_MODEL=<your-local-model-id>
 ```
 

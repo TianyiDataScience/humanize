@@ -198,13 +198,36 @@ def discover_base_url() -> str:
 
 
 def ensure_endpoint_ready(base_url: str) -> None:
-    health_url = base_url.removesuffix("/v1") + "/health"
-    try:
-        payload = _http_get_json(health_url, timeout=5.0)
-    except Exception as exc:
-        raise RuntimeError(f"Local CoPaw model endpoint is unavailable at {base_url}: {exc}") from exc
-    if payload.get("status") != "ok":
-        raise RuntimeError(f"Local CoPaw model endpoint is not healthy at {base_url}: {payload}")
+    root_url = base_url.removesuffix("/v1")
+    checks = [
+        (
+            root_url + "/health",
+            lambda payload: payload.get("status") == "ok",
+            "health",
+        ),
+        (
+            base_url.rstrip("/") + "/models",
+            lambda payload: bool(payload.get("data") or payload.get("models")),
+            "models",
+        ),
+        (
+            root_url + "/api/tags",
+            lambda payload: bool(payload.get("models")),
+            "api_tags",
+        ),
+    ]
+    errors: list[str] = []
+    for url, validator, label in checks:
+        try:
+            payload = _http_get_json(url, timeout=5.0)
+        except Exception as exc:
+            errors.append(f"{label}: {exc}")
+            continue
+        if validator(payload):
+            return
+        errors.append(f"{label}: unexpected payload {payload}")
+    joined = "; ".join(errors) if errors else "unknown error"
+    raise RuntimeError(f"Local generation endpoint is unavailable at {base_url}: {joined}")
 
 
 def discover_model(base_url: str) -> str:
@@ -244,6 +267,9 @@ def call_chat(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    reasoning_effort = os.environ.get("HUMANIZE_LLM_REASONING_EFFORT", "").strip().lower()
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
     try:
         return _http_post_json(base_url.rstrip("/") + "/chat/completions", payload, timeout=120.0)
     except urllib.error.HTTPError as exc:

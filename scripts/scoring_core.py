@@ -3,6 +3,7 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 import json
 import math
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -209,6 +210,12 @@ def build_query(spec: dict[str, Any], source_text: str) -> str:
 
 
 def default_device() -> torch.device:
+    requested = os.environ.get("HUMANIZE_SCORER_DEVICE", "").strip().lower()
+    if requested in {"cpu", "mps"}:
+        if requested == "mps" and torch.backends.mps.is_available():
+            return torch.device("mps")
+        if requested == "cpu":
+            return torch.device("cpu")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
