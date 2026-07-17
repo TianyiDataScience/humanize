@@ -436,6 +436,7 @@ def build_direct_repair_prompt(
     source_text: str,
     current_best_text: str,
     failure_tags: list[str] | None = None,
+    strategy_directives: list[str] | None = None,
 ) -> tuple[str, str]:
     system = (
         "你是中文文案修复器。\n"
@@ -444,10 +445,13 @@ def build_direct_repair_prompt(
     )
     constraints = _compact_constraints_for_direct(hard_constraints)
     failure_line = "残留问题：" + "、".join(failure_tags or []) + "\n" if failure_tags else ""
+    directive_lines = [item.strip() for item in (strategy_directives or []) if item.strip()]
+    directive_block = "本轮修复要求：\n" + "\n".join(f"- {item}" for item in directive_lines) + "\n" if directive_lines else ""
     user = (
         f"任务：{task}\n"
         f"{constraints}"
         f"{failure_line}"
+        f"{directive_block}"
         "原文只作为事实参照，不要从原文重写：\n"
         f"{source_text}\n\n"
         "当前最佳版本：\n"

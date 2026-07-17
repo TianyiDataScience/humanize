@@ -38,6 +38,7 @@ from strategy_state import (  # noqa: E402
     snapshot_state,
     state_directives,
 )
+from writing_patterns import CATEGORY_LABELS  # noqa: E402
 
 DEFAULT_MAX_ROUNDS = 3
 MAX_ALLOWED_ROUNDS = 5
@@ -124,14 +125,23 @@ QUALITY_GATE_RETRY_TAGS = {
     "placeholder_output",
     "bad_splice",
     "overcompressed",
+    "writing_patterns",
 }
+
+
+def is_quality_gate_retry_tag(tag: str) -> bool:
+    if tag in QUALITY_GATE_RETRY_TAGS:
+        return True
+    if not tag.startswith("writing_pattern:"):
+        return False
+    return tag.split(":", 1)[1] in CATEGORY_LABELS
 
 
 def quality_gate_tags(candidate: dict[str, Any]) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
     for tag in candidate.get("failure_tags") or []:
-        if tag in QUALITY_GATE_RETRY_TAGS and tag not in seen:
+        if is_quality_gate_retry_tag(tag) and tag not in seen:
             seen.add(tag)
             ordered.append(tag)
     return ordered
@@ -140,7 +150,7 @@ def quality_gate_tags(candidate: dict[str, Any]) -> list[str]:
 def retryable_quality_tags(tags: list[str]) -> list[str]:
     ordered: list[str] = []
     for tag in tags:
-        if tag in QUALITY_GATE_RETRY_TAGS and tag not in ordered:
+        if is_quality_gate_retry_tag(tag) and tag not in ordered:
             ordered.append(tag)
     return ordered
 
@@ -312,11 +322,15 @@ def localize_failure_tag(tag: str) -> str:
         "bad_splice": "句子拼接有问题",
         "placeholder_output": "像占位文本",
         "overcompressed": "压缩过头了",
+        "writing_patterns": "写作模式成组出现",
         "regressed_from_best": "相对当前最优稿回退了",
         "too_vague": "过于空泛",
         "missing_must_include": "缺少必含信息",
         "none": "无",
     }
+    if tag.startswith("writing_pattern:"):
+        category = tag.split(":", 1)[1]
+        return "写作模式：" + CATEGORY_LABELS.get(category, category)
     return mapping.get(tag, tag)
 
 
@@ -349,6 +363,8 @@ def localize_note(note: str) -> str:
     }
     if note in mapping:
         return mapping[note]
+    if note.startswith("writing pattern audit: "):
+        return "写作模式审计：" + note.split(": ", 1)[1]
     if note.startswith("contains template phrases: "):
         return "包含模板短语：" + note.split(": ", 1)[1]
     if note.startswith("retains source template phrases: "):
@@ -382,6 +398,23 @@ def localize_note(note: str) -> str:
     if note.startswith("candidate collapses paragraph structure compared with current best"):
         return "这个候选把当前最优稿的段落结构压塌了"
     return note
+
+
+def summarize_writing_pattern_audit(score_payload: dict[str, Any]) -> str:
+    audit = score_payload.get("writing_pattern_audit") or {}
+    categories = audit.get("categories") or []
+    parts: list[str] = []
+    for item in categories:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("id") or "")
+        label = str(item.get("label") or CATEGORY_LABELS.get(category, category))
+        hits = [str(hit) for hit in (item.get("hits") or []) if str(hit).strip()][:2]
+        parts.append(f"{label}（{'、'.join(hits)}）" if hits else label)
+    if not parts:
+        return ""
+    suffix = "将进入下一轮修复。" if audit.get("needs_repair") else "单项命中已记录，不单独触发重罚。"
+    return "；".join(parts) + "。 " + suffix
 
 
 def build_user_visible_summary(
@@ -505,6 +538,10 @@ def build_user_visible_summary(
                 lines.append("")
                 lines.append("备注：")
                 lines.extend(f"- {localize_note(compact_note(note))}" for note in candidate_score["notes"])
+            writing_pattern_summary = summarize_writing_pattern_audit(candidate_score)
+            if writing_pattern_summary:
+                lines.append("")
+                lines.append("写作模式审计：" + writing_pattern_summary)
             lines.append("")
         selected = round_payload["selected_candidate"]
         lines.append(
@@ -968,6 +1005,7 @@ def generate_candidate(
             source_text=source_text,
             current_best_text=current_best_text,
             failure_tags=failure_tags,
+            strategy_directives=strategy_directives,
         )
     else:
         (_, _), (challenger_system, challenger_user) = build_generation_prompts(
@@ -1291,7 +1329,7 @@ def rewrite_professional_email(
         )
     text = _apply_replacements(text, replacements)
     if repair:
-        if {"template_tone", "source_template_carryover", "too_similar"} & set(failure_tags):
+        if {"template_tone", "source_template_carryover", "too_similar", "writing_patterns"} & set(failure_tags):
             text = _apply_generic_template_repairs(text, natural=natural)
         if "bad_splice" in failure_tags:
             text = cleanup_common_phrase_collisions(text)
@@ -1512,7 +1550,7 @@ def rewrite_longform_copy(
         )
     text = _apply_replacements(text, replacements)
     if repair:
-        if {"template_tone", "source_template_carryover", "too_similar"} & set(failure_tags):
+        if {"template_tone", "source_template_carryover", "too_similar", "writing_patterns"} & set(failure_tags):
             text = _apply_generic_template_repairs(text, natural=natural)
             text = _apply_replacements(
                 text,
@@ -2334,12 +2372,20 @@ def main() -> None:
                                     "must_include": 0.0,
                                     "banned_phrases": 0.0,
                                     "template_tone": 0.0,
+                                    "writing_patterns": 0.0,
                                     "formatting": 0.0,
                                     "detailfulness": 0.0,
                                     "email_shape": 0.0,
                                     "anti_repetition": 0.0,
                                 },
                                 "notes": [f"generation error: {exc}"],
+                                "writing_pattern_audit": {
+                                    "score": 0.0,
+                                    "needs_repair": False,
+                                    "hit_count": 0,
+                                    "category_count": 0,
+                                    "categories": [],
+                                },
                             },
                             "failure_tags": ["generation_error"],
                             "error": str(exc),
