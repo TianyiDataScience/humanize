@@ -129,11 +129,19 @@ QUALITY_GATE_RETRY_TAGS = {
 }
 
 
+def is_quality_gate_retry_tag(tag: str) -> bool:
+    if tag in QUALITY_GATE_RETRY_TAGS:
+        return True
+    if not tag.startswith("writing_pattern:"):
+        return False
+    return tag.split(":", 1)[1] in CATEGORY_LABELS
+
+
 def quality_gate_tags(candidate: dict[str, Any]) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
     for tag in candidate.get("failure_tags") or []:
-        if tag in QUALITY_GATE_RETRY_TAGS and tag not in seen:
+        if is_quality_gate_retry_tag(tag) and tag not in seen:
             seen.add(tag)
             ordered.append(tag)
     return ordered
@@ -142,7 +150,7 @@ def quality_gate_tags(candidate: dict[str, Any]) -> list[str]:
 def retryable_quality_tags(tags: list[str]) -> list[str]:
     ordered: list[str] = []
     for tag in tags:
-        if tag in QUALITY_GATE_RETRY_TAGS and tag not in ordered:
+        if is_quality_gate_retry_tag(tag) and tag not in ordered:
             ordered.append(tag)
     return ordered
 

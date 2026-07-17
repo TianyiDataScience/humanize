@@ -45,6 +45,68 @@ def load_scoring_core_without_runtime_dependencies() -> types.ModuleType:
                 sys.modules[name] = original
 
 
+def load_run_from_brief_without_runtime_dependencies() -> types.ModuleType:
+    module_name = "run_from_brief_quality_gate_test"
+    replacements = {
+        "yaml": types.ModuleType("yaml"),
+        "runtime_common": types.ModuleType("runtime_common"),
+        "local_generation": types.ModuleType("local_generation"),
+        "parse_user_brief": types.ModuleType("parse_user_brief"),
+        "prepare_run": types.ModuleType("prepare_run"),
+        "render_run_report": types.ModuleType("render_run_report"),
+        "scoring_core": types.ModuleType("scoring_core"),
+        "strategy_state": types.ModuleType("strategy_state"),
+        "writing_patterns": types.ModuleType("writing_patterns"),
+    }
+    replacements["runtime_common"].reexec_into_runtime = lambda: None
+    for name in (
+        "build_direct_repair_prompt",
+        "build_direct_rewrite_prompt",
+        "build_generation_prompts",
+        "call_chat",
+        "discover_generation_backend",
+        "extract_content",
+    ):
+        setattr(replacements["local_generation"], name, lambda *args, **kwargs: None)
+    replacements["parse_user_brief"].build_payload = lambda *args, **kwargs: None
+    replacements["prepare_run"].create_run_dir = lambda *args, **kwargs: None
+    replacements["render_run_report"].build_html = lambda *args, **kwargs: None
+    replacements["render_run_report"].build_markdown = lambda *args, **kwargs: None
+    replacements["scoring_core"].DEFAULT_TEMPLATE_PHRASES = []
+    replacements["scoring_core"].dump_score_json = lambda *args, **kwargs: None
+    replacements["scoring_core"].score_candidate = lambda *args, **kwargs: None
+    for name in (
+        "choose_profiles",
+        "evolve_after_attempts",
+        "extract_failure_tags",
+        "load_state",
+        "save_state",
+        "snapshot_state",
+        "state_directives",
+    ):
+        setattr(replacements["strategy_state"], name, lambda *args, **kwargs: None)
+    replacements["writing_patterns"].CATEGORY_LABELS = {"inflated_significance": "label"}
+
+    previous = {name: sys.modules.get(name) for name in replacements}
+    sys.modules.update(replacements)
+    try:
+        module_path = ROOT / "scripts" / "run_from_brief.py"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise AssertionError("could not load run_from_brief for the quality-gate test")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.modules.pop(module_name, None)
+        for name, original in previous.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+
+
 class WritingPatternAuditTests(unittest.TestCase):
     def test_single_signal_stays_visible_without_penalty(self) -> None:
         audit = audit_writing_patterns("本次发布标志着一个重要里程碑。")
@@ -102,6 +164,20 @@ class WritingPatternAuditTests(unittest.TestCase):
         )
         self.assertIn("本轮修复要求：", prompt)
         self.assertIn("普通进展写成里程碑", prompt)
+
+    def test_quality_gate_retry_keeps_valid_writing_pattern_categories(self) -> None:
+        run_from_brief = load_run_from_brief_without_runtime_dependencies()
+        tags = [
+            "writing_patterns",
+            "writing_pattern:inflated_significance",
+            "writing_pattern:unknown",
+            "too_similar",
+            "writing_pattern:inflated_significance",
+        ]
+        expected = ["writing_patterns", "writing_pattern:inflated_significance", "too_similar"]
+
+        self.assertEqual(run_from_brief.quality_gate_tags({"failure_tags": tags}), expected)
+        self.assertEqual(run_from_brief.retryable_quality_tags(tags), expected)
 
     def test_scoring_payload_includes_the_audit_without_loading_a_model(self) -> None:
         scoring_core = load_scoring_core_without_runtime_dependencies()
