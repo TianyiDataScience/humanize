@@ -13,15 +13,16 @@ Internally:
   - required phrase coverage
   - banned phrase hits
   - common template-phrase hits
+  - conservative, explainable writing-pattern clusters
   - formatting penalties
 
 Default formula:
 
 ```text
-final_score = 0.78 * model_score + 0.22 * rule_score
+final_score = 0.64 * model_score + 0.36 * rule_score
 ```
 
-This is intentionally simple for V1 so users can understand why a draft was
+The formula stays intentionally simple so users can understand why a draft was
 kept or discarded.
 
 The default scorer model is:
@@ -42,6 +43,29 @@ A candidate is considered unsafe to keep when:
 - `must_include` exists and any required phrase is missing
 - `max_chars` exists and the draft is much longer than allowed
 - the draft contains too many banned phrases
+
+Writing-pattern audit findings never cause a hard fail by themselves.
+
+## Writing Pattern Audit
+
+Each scored candidate includes `writing_pattern_audit`, with the matched
+categories, short evidence snippets, a rule score, and whether the pattern
+cluster should enter the next repair round. The first version covers:
+
+- inflated significance
+- promotional language
+- vague attribution
+- formulaic contrast
+- generic conclusion
+- chatbot-style sign-off
+
+The audit is conservative:
+
+- One matched word or sentence pattern is visible but does not lower the score.
+- A score penalty starts only when multiple signals form a cluster.
+- Quoted text, titles, and fenced code are excluded from matching.
+- The repair loop receives the matched categories as concrete instructions, so
+  it can change the problem wording without flattening the rest of the copy.
 
 ## Why This Is Not An AI Detector
 

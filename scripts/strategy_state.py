@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime_common import runtime_root
+from writing_patterns import category_ids, repair_directives
 
 PROFILE_LIBRARY: dict[str, str] = {
     "steady": "稳健完整，优先保证信息清楚、可信、不过度修饰。",
@@ -128,7 +129,7 @@ def choose_profiles(
     if "too_short" in failure_tags or "too_vague" in failure_tags:
         chosen.append("steady")
         chosen.append("reassuring")
-    if "template_tone" in failure_tags:
+    if "template_tone" in failure_tags or "writing_patterns" in failure_tags:
         chosen.append("natural")
         chosen.append("direct")
     if "wrong_audience" in failure_tags:
@@ -152,6 +153,10 @@ def extract_failure_tags(task: str, candidate_text: str, score_payload: dict[str
         tags.append("source_template_carryover")
     if any("contains banned phrases" in item for item in lowered_notes):
         tags.append("banned_phrase")
+    writing_pattern_audit = score_payload.get("writing_pattern_audit") or {}
+    if bool(writing_pattern_audit.get("needs_repair")):
+        tags.append("writing_patterns")
+        tags.extend(f"writing_pattern:{category}" for category in category_ids(writing_pattern_audit))
     if any("rewrite too similar to source" in item or "rewrite still very close to source" in item for item in lowered_notes):
         tags.append("too_similar")
     if any("sentence splice issue" in item or "sentence structure is broken by phrase collision" in item for item in lowered_notes):
@@ -216,6 +221,12 @@ def state_directives(state: dict[str, Any], failure_tags: list[str]) -> list[str
         directives.append("上一轮太短或太虚，这一轮要补足动作、状态和时间承诺。")
     if "template_tone" in failure_tags:
         directives.append("上一轮太模板，这一轮用更自然、更像真人微信的表达。")
+    writing_pattern_categories = [
+        tag.split(":", 1)[1]
+        for tag in failure_tags
+        if tag.startswith("writing_pattern:")
+    ]
+    directives.extend(repair_directives(writing_pattern_categories))
     if "source_template_carryover" in failure_tags:
         directives.append("上一轮还保留了原文里的套话，这一轮把这些高频模板词换成新的真人表达。")
     if "too_similar" in failure_tags:
@@ -270,8 +281,9 @@ def evolve_after_attempts(
             policies["audience_guardrail"] = "hard"
         if "too_short" in failure_tags or "too_vague" in failure_tags:
             policies["min_detail"] = "high"
-        if "template_tone" in failure_tags:
+        if "template_tone" in failure_tags or "writing_patterns" in failure_tags:
             policies["avoid_template_tone"] = "very_high"
+            policies["self_check"] = True
         if "source_template_carryover" in failure_tags:
             policies["avoid_template_tone"] = "very_high"
             policies["self_check"] = True

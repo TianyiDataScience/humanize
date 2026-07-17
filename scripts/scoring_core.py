@@ -14,6 +14,7 @@ import yaml
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from runtime_common import DEFAULT_GOAL, DEFAULT_MODEL_ID, model_dir
+from writing_patterns import audit_writing_patterns, category_ids, category_labels
 
 DEFAULT_TEMPLATE_PHRASES = [
     "在当下这个充满不确定性却又蕴含巨大机会的时代",
@@ -144,6 +145,7 @@ class CandidateScore:
     query: str
     rule_breakdown: dict[str, float]
     notes: list[str]
+    writing_pattern_audit: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -158,6 +160,7 @@ class CandidateScore:
                 for key, value in self.rule_breakdown.items()
             },
             "notes": self.notes,
+            "writing_pattern_audit": self.writing_pattern_audit,
         }
 
 
@@ -615,6 +618,11 @@ def score_candidate(spec: dict[str, Any], candidate: str, source_text: str = "")
     l_score = length_score(spec, char_count, notes)
     keep_score, missing_must_include = must_include_score(spec, candidate, notes)
     banned_score, template_score = phrase_penalty_score(spec, candidate, notes)
+    writing_pattern_audit = audit_writing_patterns(candidate)
+    writing_pattern_score = float(writing_pattern_audit["score"])
+    if writing_pattern_score < 1.0:
+        labels = category_labels(category_ids(writing_pattern_audit))
+        notes.append("writing pattern audit: " + " / ".join(labels))
     source_reduction_score = source_template_reduction_score(source_text, candidate, notes)
     similarity_score = rewrite_similarity_score(source_text, candidate, notes)
     splice_score = sentence_splice_score(candidate, notes)
@@ -632,7 +640,8 @@ def score_candidate(spec: dict[str, Any], candidate: str, source_text: str = "")
             ("length", l_score, 0.10),
             ("must_include", keep_score, 0.22),
             ("banned_phrases", banned_score, 0.12),
-            ("template_tone", template_score, 0.14),
+            ("template_tone", template_score, 0.10),
+            ("writing_patterns", writing_pattern_score, 0.04),
             ("source_template_reduction", source_reduction_score, 0.22),
             ("rewrite_similarity", similarity_score, 0.14),
             ("sentence_splice", splice_score, 0.10),
@@ -718,6 +727,7 @@ def score_candidate(spec: dict[str, Any], candidate: str, source_text: str = "")
         query=query,
         rule_breakdown=breakdown,
         notes=notes,
+        writing_pattern_audit=writing_pattern_audit,
     )
 
 

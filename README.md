@@ -35,6 +35,8 @@ v2 里，`humanize` 不是和主模型直出竞争。它会把主模型直出也
 
 > 让中文内容更像真人会说的话，减少模板腔、客服腔、公告腔和过度 AI 润色感，同时保留原意和必要事实。
 
+评分结果会附带一个 `writing_pattern_audit`：它记录成组出现的夸大意义、宣传式措辞、模糊归因等写作模式，并把具体类别交给下一轮 repair。单个常见词或单个句式只会被记录，不会单独重罚；它不是“是否由 AI 写作”的判断。
+
 ---
 
 ## 快速开始
@@ -607,9 +609,16 @@ python3 scripts/run_regression_suite.py \
 ```bash
 python3 -m py_compile \
   humanize.py \
+  scripts/writing_patterns.py \
   scripts/run_from_brief.py \
   scripts/local_generation.py \
   scripts/run_regression_suite.py
+```
+
+运行不依赖模型的写作模式回归检查：
+
+```bash
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 安装到 CoPaw 后，也可以检查已安装版：
@@ -617,6 +626,7 @@ python3 -m py_compile \
 ```bash
 python3 -m py_compile \
   ~/.copaw/workspaces/default/skills/humanize/humanize.py \
+  ~/.copaw/workspaces/default/skills/humanize/scripts/writing_patterns.py \
   ~/.copaw/workspaces/default/skills/humanize/scripts/run_from_brief.py \
   ~/.copaw/workspaces/default/skills/humanize/scripts/local_generation.py \
   ~/.copaw/workspaces/default/skills/humanize/scripts/run_regression_suite.py
